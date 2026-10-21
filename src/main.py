@@ -3,17 +3,32 @@
 import time
 from marlin import Robot, Thruster, Servo, IMU, RadioBeacon
 
-# Brain port definitions
-IMU_PORT = "S1"
-RADIOBEACON_PORT = "S6"
-LEFT = "M8"
-RIGHT = "M1"
+# Brain port definitions (false to disable)
+LEFT_THRUST = "M8" 
+RIGHT_THRUST = "M1"
+LEFT_THRUST_SECONDARY = "M7" 
+RIGHT_THRUST_SECONDARY = "M6" 
+
 ARM = "M2"
 
+IMU_PORT = "S4"
+RADIOBEACON_PORT = "S6"
+
+
+# create our robot object depending on what we have
 robot = Robot()
 robot.configure(
-    sensors={IMU_PORT: IMU, RADIOBEACON_PORT: RadioBeacon},
-    effectors={LEFT: Thruster, RIGHT: Thruster, ARM: Servo},
+    sensors={
+        IMU_PORT: IMU, 
+        RADIOBEACON_PORT: RadioBeacon
+    },
+    effectors={
+        LEFT_THRUST: Thruster, 
+        RIGHT_THRUST: Thruster, 
+        LEFT_THRUST_SECONDARY: Thruster, 
+        RIGHT_THRUST_SECONDARY: Thruster, 
+        ARM: Servo
+    },
 )
 
 
@@ -33,8 +48,8 @@ def driver(robot):
         left = robot.controller.joystick("ONE").value
         right = robot.controller.joystick("THREE").value
 
-        robot.thruster(LEFT).set_duty(left)
-        robot.thruster(RIGHT).set_duty(right)
+        robot.thruster(LEFT_THRUST).set_duty(left)
+        robot.thruster(RIGHT_THRUST).set_duty(right)
 
         # Set Servo speed to 180 deg/s
         robot.servo(ARM).set_speed(180)
@@ -47,7 +62,8 @@ def driver(robot):
         # print IMU readings
         imu_reading = robot.imu(IMU_PORT).read()
         if imu_reading.ok:
-            print(imu_reading)
+            print(imu_reading.mag_x)
+            # imu_reading.gyro()
 
         # print RadioBeacon readings
         radiobeacon_reading = robot.radiobeacon(RADIOBEACON_PORT).read()
@@ -60,3 +76,15 @@ robot.run(
     autonomous=autonomous,
     driver=driver,
 )
+
+
+
+# --- robot functions --- #
+
+# bounds of each axis is needed to calculate yaw with magnometer
+def imu_calibrateMag(time = 5): 
+    results = {}
+    axises = ["x", "y", "z",]
+    for axis in axises:
+        pass
+
