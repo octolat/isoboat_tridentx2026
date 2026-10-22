@@ -1,9 +1,13 @@
 """A MARLIN robot with tank drive controls, servo control, and sensor reading printouts."""
 
+from ipaddress import collapse_addresses
 import time
 from marlin import Robot, Thruster, Servo, IMU, RadioBeacon
 
-# Brain port definitions (false to disable)
+# defines
+XYZ_ARR = ["x", "y", "z"]
+
+# Brain port definitions
 LEFT_THRUST = "M8" 
 RIGHT_THRUST = "M1"
 LEFT_THRUST_SECONDARY = "M7" 
@@ -14,6 +18,15 @@ ARM = "M2"
 IMU_PORT = "S4"
 RADIOBEACON_PORT = "S6"
 
+# settings and values for the auton (is like this so i dont have to global everytihbn in the funcctions)
+atn_set = {
+    "imu_calib": {
+        'x': {'max': 342, 'min': -201, 'count': 912259}, 
+        'y': {'max': 558, 'min': 3, 'count': 843805}, 
+        'z': {'max': 320, 'min': -238, 'count': 943009}
+        }
+
+}
 
 # create our robot object depending on what we have
 robot = Robot()
@@ -35,12 +48,6 @@ robot.configure(
 def initialize(robot):
     time.sleep(0.5)
     print("Battery:", robot.battery_voltage, "V")
-
-
-def autonomous(robot):
-    while robot.running:
-        pass
-
 
 def driver(robot):
     while robot.running:
@@ -70,21 +77,66 @@ def driver(robot):
         if radiobeacon_reading.ok:
             print(radiobeacon_reading)
 
+def autonomous(robot):
+    while robot.running:
+        pass
 
-robot.run(
-    initialize=initialize,
-    autonomous=autonomous,
-    driver=driver,
-)
 
+
+
+
+
+
+def testing(robot):
+    if atn_set["imu_calib"] == None or True: 
+        atn_set["imu_calib"] = imu_calibrateMag()
+        print(f"imu calib results: {atn_set["imu_calib"]}")
+
+    time.sleep(5)
+
+    getMagHeading(atn_set["imu_calib"])
 
 
 # --- robot functions --- #
 
 # bounds of each axis is needed to calculate yaw with magnometer
-def imu_calibrateMag(time = 5): 
+def imu_calibrateMag(duration = 5): 
     results = {}
-    axises = ["x", "y", "z",]
-    for axis in axises:
-        pass
+    for i, axis in enumerate(XYZ_ARR):
+        print(f"rotate along the {axis} axis. send input when ready.")
+        input()
+        tstart = time.time()
+        result = {"max": None, "min": None, "count": 0}
+        while (tstart + duration > time.time()):
+            reading = imu_read()["mag"][i]
+            if result["max"] is None or result["max"] < reading:
+                result["max"] = reading
+            if result["min"] is None or result["min"] > reading:
+                result["min"] = reading
+            result["count"] += 1
 
+        print(result)
+        results[axis] = result
+
+    return results
+
+def getMagHeading(calibration):
+    mag_vec = imu_read()["mag"]
+
+def imu_read():
+    readings = {}
+    row = ["accel", "gyro", "mag"]
+    for type in row:
+        vector = [0]*3 #implicitly a xyz format okay 
+        for i, axis in enumerate(XYZ_ARR):
+            vector[i] = getattr(robot.imu(IMU_PORT).read(), f"{type}_{axis}")
+        readings[type] = vector
+
+    return readings
+
+
+robot.run(
+    initialize=initialize,
+    autonomous=autonomous,
+    driver=testing,
+)
