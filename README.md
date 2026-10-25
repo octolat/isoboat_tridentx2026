@@ -9,13 +9,14 @@ There will be multiple ports, and occasionally it may say connected even though 
 3. as well as for pyyaml and matplotlib
 
 # quick api hints
-!!!Change the value of `TRIDENTXPATH` to your own path of the tridentx folder!!!
+!!!Change the value of `TRIDENTXPATH` to your own path of the tridentx folder!!!  
 the `motion_tuning.yaml` and `imu_calibration.yaml` files should be inside.  
 the `Motion` and `Sensing` classes rely on those config files respectively.  
-look at testing() for how to use the functions
-``
+look at `testing()` for how to use the functions.  
+to run the code, press the driver button. to stop, press the e-stop button.  
+i put auton stuff in driver mode for now cause auton mode has a time limit which is really annoying, but the final code should be in auton mode.
 
-dev notes:
+# dev notes:
 marlin module code is at `marlin_src` for reference (og was at `~\\.vscode\\extensions\\polymatepteltd.marlin-controller-1.0.3\\dist\\marlin\\` )   
 [api reference](https://marlin.polymate.tech/api-reference/)  
 

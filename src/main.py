@@ -10,12 +10,6 @@ import numpy as np
 import yaml
 from marlin import Robot, Thruster, Servo, IMU, RadioBeacon
 
-import os
-
-# Get and print the current working directory
-cwd = os.getcwd()
-print(cwd)
-
 # defines
 XYZ_ARR = ["x", "y", "z"]
 
@@ -380,7 +374,7 @@ class Motion(SettingsManager):
             error = (target_heading - self.sensing.mag_angle + 180) % 360 - 180
             offset = (error*self.turning_kp)
             self.move(speed+offset, speed-offset)
-            print(f"turnTo: current_heading: {reading} error:{error}, speeds:{speed}+-{offset}")
+            print(f"turnTo: current_heading:{reading}, error:{error}, speeds:{speed}+-{offset}")
 
     def move(self, left, right):
         # left and right is out of 100
@@ -416,5 +410,3 @@ robot.run(
     autonomous=autonomous,
     driver=testing,
 )
-
-print(robot)
