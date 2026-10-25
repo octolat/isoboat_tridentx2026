@@ -1,0 +1,6 @@
+turning_kp: 1
+turning_ki: 0
+turning_kd: 0
+move_turning_kp: 1
+move_turning_ki: 0
+move_turning_kd: 0
