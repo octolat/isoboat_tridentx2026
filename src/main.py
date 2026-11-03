@@ -1,15 +1,10 @@
 """A MARLIN robot with tank drive controls, servo control, and sensor reading printouts."""
 
-from __future__ import annotations
-from dataclasses import dataclass, field
-
 import time
 import math
-from turtle import heading
 import numpy as np  
 import yaml
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
 
 from marlin import Robot, Thruster, Servo, IMU, RadioBeacon
 
@@ -22,8 +17,8 @@ TRIDENTXPATH = "C:/Users/tansi/Documents/projects/tridentx"
 # Brain port definitions
 LEFT_THRUST = "M8" 
 RIGHT_THRUST = "M1"
-LEFT_THRUST_SECONDARY = "M7" 
-RIGHT_THRUST_SECONDARY = "M6" 
+LEFT_THRUST_SECONDARY = "M2" 
+RIGHT_THRUST_SECONDARY = "M7" 
 
 ARM = "M6"
 
@@ -87,8 +82,8 @@ def autonomous(robot):
         pass
 
 class SettingsManager:
-    def __init__(self, ignore_list=[]):
-        self.ignore_list = ignore_list
+    def __init__(self, ignore_list=None):
+        self.ignore_list = [] if ignore_list is None else ignore_list
 
     def importData(self, path):
         with open(path, "r") as file:
@@ -129,17 +124,19 @@ class ImuCalibration(SettingsManager):
             self, 
             sensing,
             load_from_path=None,
-            mag_min=np.full(3, np.nan),
-            mag_max=np.full(3, np.nan),
-            mag_count=np.full(3, np.nan),
+            mag_min=None,
+            mag_max=None,
+            mag_count=None,
+            heading_alpha=None
         ):
         super().__init__(ignore_list=[Sensing])
 
         self.sensing = sensing
 
-        self.mag_min = mag_min
-        self.mag_max = mag_max
-        self.mag_count = mag_count
+        self.mag_min = np.full(3, np.nan) if mag_min is None else mag_min
+        self.mag_max = np.full(3, np.nan) if mag_max is None else mag_max
+        self.mag_count = np.full(3, np.nan) if mag_count is None else mag_count
+        self.heading_alpha = heading_alpha
 
 
         if not load_from_path is None:
@@ -187,10 +184,10 @@ class ImuCalibration(SettingsManager):
             self.plotMag(mode="provided", x=values_list["x"], y=values_list["y"])
 
     def plotMag(self, mode = "raw", duration = 15, x=[], y=[]):
-        print("Plotting starting. When ready, input and rotate imu on a flat surface.")
-        input()
         tstart = time.time()
         if mode != "provided":
+            print("Plotting starting. When ready, input and rotate imu on a flat surface.")
+            input()
             while (tstart + duration > time.time() and self.sensing.robot.running):
                 if mode =="raw":
                     self.sensing._readRaw()
@@ -238,7 +235,7 @@ class Sensing(SettingsManager):
 
         self.heading = self.mag_heading 
 
-        self.velo_old_timestamp = None
+        self.velo_old_timestamp = self.raw_timestamp
         self.velo_change_vec = None
         self.velo_heading = None
         self.getGyroHeading()
@@ -246,8 +243,16 @@ class Sensing(SettingsManager):
         self.getMergedHeading()
 
     def getMergedHeading(self):
+        success1, gyro= self.getGyroHeading()
+        success2, mag= self.getMagHeading()
         a = self.imu_calib.heading_alpha
-        self.heading = a*self.velo_heading + (1-a)*self.mag_heading
+
+        # shortest signed angle from gyro heading to mag heading
+        diff = (mag - gyro + 180) % 360 - 180
+        # same as a*gyro + (1-a)*mag, but safe across the +-180 wrap
+        self.heading = (gyro + (1 - a) * diff + 180) % 360 - 180
+
+        return success1 and success2, self.heading
 
     def getGyroHeading(self):
         success = True
@@ -315,10 +320,6 @@ class Sensing(SettingsManager):
             x,y,z = self.raw_accel
             
 
-class Plotter: # work in progress
-    def __init__(self):
-        rr.init("boat", spawn=True)
-
 class Motion(SettingsManager):
     def __init__(self, robot, sensing, 
                 load_from_path,
@@ -351,7 +352,7 @@ class Motion(SettingsManager):
         self.ax.set_aspect('equal')
         self.scat = self.ax.scatter(0, 0)
 
-    def turnTo(self, target_heading, speed=50, timeout=20, threshold = 20, heading_method="merged"):
+    def turnTo(self, target_heading, timeout=20, threshold = 20, heading_method="merged"):
         #everythins in degrees
         #target_heading is after offset btw
 
@@ -365,13 +366,13 @@ class Motion(SettingsManager):
         while self.robot.running:
             #turn robot
             success, reading = getHeading()
-            if success == None:
+            if success == False:
                 print("WARNGING: imu failed! using old values")
             error = (target_heading - reading + 180) % 360 - 180
             offset = (error*self.turning_kp)
             self.move(offset, -offset)
             print(f"turnTo: current_heading: {reading} error:{error}, speeds:+-{offset}")
-            self.plot(reading)
+            self.plot("heading", reading)
 
             # check for timeout
             time_length = time.time() - start_t
@@ -404,9 +405,9 @@ class Motion(SettingsManager):
             num = 10
             target_heading = 0
             for i in range(num):
-                while not robot.running:
+                while not self.robot.running:
                     pass
-                target_heading += getHeading() * 1/num
+                target_heading += getHeading()[1] * 1/num
 
         start_t = time.time()
         while self.robot.running:
@@ -417,15 +418,15 @@ class Motion(SettingsManager):
 
             # move robot while compensating for heading
             success, reading = getHeading()
-            if success == None:
+            if success == False:
                 print("WARNGING: imu failed! using old values")
             error = (target_heading - reading + 180) % 360 - 180
             # self.sensing._readRaw()
             # error = -self.sensing.raw_gyro[2]
             offset = (error*self.move_turning_kp)
             self.move(speed+offset, speed-offset)
-            print(f"turnTo: current_heading:{reading}, error:{error}, speeds:{speed}+-{offset}")
-            self.plot(reading)
+            print(f"moveTo: current_heading:{reading}, error:{error}, speeds:{speed}+-{offset}")
+            self.plot("heading", reading)
 
     def move(self, left, right, offset=0):
         # if we give up on using imu, we can fix tilted movement by hardcoding one motor to drive harder than the other.
@@ -445,7 +446,7 @@ class Motion(SettingsManager):
     def plot(self, mode, reading):
         if not self.plotting: return
         if mode == "heading":
-            heading = reading
+            heading = 3.14/180 * reading
             self.scat.set_offsets([[0,0],[math.cos(heading),math.sin(heading)]])
             
             # Force the canvas to redraw the current graphical changes
@@ -455,14 +456,14 @@ class Motion(SettingsManager):
             self.fig.canvas.flush_events()
             
             # Add a short structural pause to allow the window engine to render
-            self.plt.pause(0.01)
+            plt.pause(0.01)
 
     def togglePlot(self, status):
         self.plotting = status
         if status:
-            self.plt.ion()
+            plt.ion()
         elif not status:
-            self.plt.ioff()
+            plt.ioff()
 
 
 def testing(robot):
