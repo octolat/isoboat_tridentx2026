@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+
 import time
 import math
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
+from turtle import heading
 import numpy as np  
 import yaml
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider
+
 from marlin import Robot, Thruster, Servo, IMU, RadioBeacon
 
 # defines
@@ -22,29 +25,29 @@ RIGHT_THRUST = "M1"
 LEFT_THRUST_SECONDARY = "M7" 
 RIGHT_THRUST_SECONDARY = "M6" 
 
-ARM = "M2"
+ARM = "M6"
 
-IMU_PORT = "S4"
-RADIOBEACON_PORT = "S6"
-
-
+IMU_PORT = "S6"
+RADIOBEACON_PORT = "S1"
 
 
-# create our robot object depending on what we have
-robot = Robot()
-robot.configure(
-    sensors={
-        IMU_PORT: IMU, 
-        RADIOBEACON_PORT: RadioBeacon
-    },
-    effectors={
-        LEFT_THRUST: Thruster, 
-        RIGHT_THRUST: Thruster, 
-        LEFT_THRUST_SECONDARY: Thruster, 
-        RIGHT_THRUST_SECONDARY: Thruster, 
-        ARM: Servo
-    },
-)
+
+
+# # create our robot object depending on what we have
+# robot = Robot()
+# robot.configure(
+#     sensors={
+#         IMU_PORT: IMU, 
+#         RADIOBEACON_PORT: RadioBeacon
+#     },
+#     effectors={
+#         LEFT_THRUST: Thruster, 
+#         RIGHT_THRUST: Thruster, 
+#         LEFT_THRUST_SECONDARY: Thruster, 
+#         RIGHT_THRUST_SECONDARY: Thruster, 
+#         ARM: Servo
+#     },
+# )
 
 
 def initialize(robot):
@@ -64,9 +67,9 @@ def driver(robot):
         robot.servo(ARM).set_speed(180)
 
         if robot.controller.button("LEFT_TRIGGER").is_down:
-            robot.servo(ARM).angle(120)
+            robot.servo(ARM).angle(150)
         else:
-            robot.servo(ARM).angle(0)
+            robot.servo(ARM).angle(60)
 
         # print IMU readings
         imu_reading = robot.imu(IMU_PORT).read()
@@ -226,30 +229,59 @@ class Sensing(SettingsManager):
         self.raw_timestamp = None
         self._readRaw()
 
+        # initalise proccessed headings
         self.heading_offset = 0
 
         self.mag_vec = None
-        self.mag_angle = None
+        self.mag_heading = None
         self.getMagHeading()
+
+        self.heading = self.mag_heading 
+
+        self.velo_old_timestamp = None
+        self.velo_change_vec = None
+        self.velo_heading = None
+        self.getGyroHeading()
+
+        self.getMergedHeading()
+
+    def getMergedHeading(self):
+        a = self.imu_calib.heading_alpha
+        self.heading = a*self.velo_heading + (1-a)*self.mag_heading
+
+    def getGyroHeading(self):
+        success = True
+        self._readRaw()
+        if self.raw_timestamp is None:
+            success = False
+        else:
+            dt = (self.raw_timestamp - self.velo_old_timestamp)/1000
+            self.velo_old_timestamp = self.raw_timestamp
+            self.velo_change_vec = self.raw_gyro * dt
+            self.velo_heading = (self.heading + self.velo_change_vec[2] +180) % 360 -180
+        return success, self.velo_heading
 
 
     def getMagHeading(self):
         # normalise the mags
+        success = True
         self._readRaw()
         if self.raw_timestamp is None:
-            return None
-        ranges = self.imu_calib.mag_max - self.imu_calib.mag_min 
-        centres = self.imu_calib.mag_min + ranges / 2
-        scalings = np.zeros(3)
-        for i, curr in enumerate(XYZ_ARR):
-            # compare to everything but itself
-            # comparisions = [i for i, x in enumerate(XYZ_ARR) if x != curr]
-            # scalings[i] = (ranges[i] / min(ranges[i], ranges[comparisions[0]])) * (ranges[i] / min(ranges[i], ranges[comparisions[1]]))
-            scalings[i] = ranges[i] / min(ranges)
-        mag_vec = (self.raw_mag - centres) / scalings / min(ranges)
-        self.mag = mag_vec
-        self.mag_angle = (math.degrees(math.atan2(mag_vec[0], mag_vec[1])) - self.heading_offset +180)%360-180
-        return self.mag_angle
+            success = False
+        else:
+            ranges = self.imu_calib.mag_max - self.imu_calib.mag_min 
+            centres = self.imu_calib.mag_min + ranges / 2
+            scalings = np.zeros(3)
+            for i, curr in enumerate(XYZ_ARR):
+                # compare to everything but itself
+                # comparisions = [i for i, x in enumerate(XYZ_ARR) if x != curr]
+                # scalings[i] = (ranges[i] / min(ranges[i], ranges[comparisions[0]])) * (ranges[i] / min(ranges[i], ranges[comparisions[1]]))
+                scalings[i] = ranges[i] / min(ranges)
+            mag_vec = (self.raw_mag - centres) / scalings / min(ranges)
+            self.mag = mag_vec
+            self.mag_heading = (math.degrees(math.atan2(mag_vec[0], mag_vec[1])) - self.heading_offset +180)%360-180
+        return success, self.mag_heading
+
 
     def _readRaw(self):
         # returns RAW values in a dictionary with keys accel gyro mag timestamp
@@ -277,29 +309,20 @@ class Sensing(SettingsManager):
         # so when the match starts and we drift / never place properly its all okay
         self.heading_offset = offset
 
+    def findTilt(self, method="trust_z"):
+        if method == "trust_z":
+            self._readRaw()
+            x,y,z = self.raw_accel
+            
+
 class Plotter: # work in progress
     def __init__(self):
-        # plt.ion()
-        fig, axes = plt.subplots(nrows=2, ncols=2)
-        
-        self.windows = {
-            "Heading": (0,0),
-        }
-
-        # set heading window
-        ax = axes[*self.windows["Heading"]]
-        ax.set_title("Heading")
-        ax.set_aspect('equal', adjustable='box') 
-        ax.set_xlim(-1,1)
-        ax.set_ylim(-1,1)
-        ax.scatter(0,0, s=10, c='b')
-
-        plt.tight_layout()
-        plt.show()
+        rr.init("boat", spawn=True)
 
 class Motion(SettingsManager):
     def __init__(self, robot, sensing, 
                 load_from_path,
+                plotting=True,
                 turning_kp=None,
                 turning_ki=None,
                 turning_kd=None,
@@ -311,6 +334,8 @@ class Motion(SettingsManager):
         self.robot = robot
         self.sensing = sensing
 
+        self.plotting = plotting
+
         self.turning_kp = turning_kp
         self.turning_ki = turning_ki
         self.turning_kd = turning_kd
@@ -320,27 +345,42 @@ class Motion(SettingsManager):
 
         self.importData(load_from_path)
 
-    def turnTo(self, target_heading, speed=50, timeout=5, threshold = 5):
+        #plot settings
+        self.fig, self.ax = plt.subplots()
+        self.ax.set(xlim=(-1, 1), ylim=(-1, 1))
+        self.ax.set_aspect('equal')
+        self.scat = self.ax.scatter(0, 0)
+
+    def turnTo(self, target_heading, speed=50, timeout=20, threshold = 20, heading_method="merged"):
         #everythins in degrees
         #target_heading is after offset btw
+
+        # assign correct method
+        if heading_method == "magnometer":
+            getHeading = self.sensing.getMagHeading
+        elif heading_method == "merged":
+            getHeading = self.sensing.getMergedHeading
+
         start_t = time.time()
         while self.robot.running:
             #turn robot
-            reading = self.sensing.getMagHeading()
-            if reading == None:
+            success, reading = getHeading()
+            if success == None:
                 print("WARNGING: imu failed! using old values")
-            error = (target_heading - self.sensing.mag_angle + 180) % 360 - 180
+            error = (target_heading - reading + 180) % 360 - 180
             offset = (error*self.turning_kp)
             self.move(offset, -offset)
             print(f"turnTo: current_heading: {reading} error:{error}, speeds:+-{offset}")
+            self.plot(reading)
 
-            # check for end condition
+            # check for timeout
             time_length = time.time() - start_t
             if time_length > timeout: break
             if abs(error) < threshold: break
 
 
-    def moveTo(self, unit, value, target_heading, speed = 80, timeout=8):
+    def moveTo(self, unit, value, target_heading, 
+               speed = 80, timeout=20, heading_method = "merged"):
         # only unit == "time" implemented. time in seconds.
         # put seconds in value
 
@@ -352,13 +392,21 @@ class Motion(SettingsManager):
 
         # for timeout, if the function does not accomplish the goal by the set amount of time, 
         # it quits and moves on. helps when u hit a wall or something.
+
+        # assign correct method
+        if heading_method == "magnometer":
+            getHeading = self.sensing.getMagHeading
+        elif heading_method == "merged":
+            getHeading = self.sensing.getMergedHeading
+
+        #gets current heading
         if target_heading is None:
             num = 10
             target_heading = 0
             for i in range(num):
                 while not robot.running:
                     pass
-                target_heading += self.sensing.getMagHeading() * 1/num
+                target_heading += getHeading() * 1/num
 
         start_t = time.time()
         while self.robot.running:
@@ -368,15 +416,22 @@ class Motion(SettingsManager):
             if unit == "time" and time_length > value: break
 
             # move robot while compensating for heading
-            reading = self.sensing.getMagHeading()
-            if reading == None:
+            success, reading = getHeading()
+            if success == None:
                 print("WARNGING: imu failed! using old values")
-            error = (target_heading - self.sensing.mag_angle + 180) % 360 - 180
-            offset = (error*self.turning_kp)
+            error = (target_heading - reading + 180) % 360 - 180
+            # self.sensing._readRaw()
+            # error = -self.sensing.raw_gyro[2]
+            offset = (error*self.move_turning_kp)
             self.move(speed+offset, speed-offset)
             print(f"turnTo: current_heading:{reading}, error:{error}, speeds:{speed}+-{offset}")
+            self.plot(reading)
 
-    def move(self, left, right):
+    def move(self, left, right, offset=0):
+        # if we give up on using imu, we can fix tilted movement by hardcoding one motor to drive harder than the other.
+        left+=offset
+        right-=offset
+
         # left and right is out of 100
         left = min(100, max(-100, left))
         right = min(100, max(-100, right))
@@ -387,26 +442,50 @@ class Motion(SettingsManager):
         self.robot.thruster(RIGHT_THRUST).set_duty(right)
         self.robot.thruster(RIGHT_THRUST_SECONDARY).set_duty(right)
 
+    def plot(self, mode, reading):
+        if not self.plotting: return
+        if mode == "heading":
+            heading = reading
+            self.scat.set_offsets([[0,0],[math.cos(heading),math.sin(heading)]])
+            
+            # Force the canvas to redraw the current graphical changes
+            self.fig.canvas.draw()
+            
+            # Flush GUI events to clear out older queued frames
+            self.fig.canvas.flush_events()
+            
+            # Add a short structural pause to allow the window engine to render
+            self.plt.pause(0.01)
 
-
+    def togglePlot(self, status):
+        self.plotting = status
+        if status:
+            self.plt.ion()
+        elif not status:
+            self.plt.ioff()
 
 
 def testing(robot):
     # create the classes
     sensing = Sensing(robot, load_from_path=f"{TRIDENTXPATH}/imu_calibration.yaml")
     motion = Motion(robot, sensing, load_from_path=f"{TRIDENTXPATH}/motion_tuning.yaml")
+    # while robot.running:
+    #     # print(sensing.getMagHeading())
+    #     sensing._readRaw()
+    #     print(sensing.raw_gyro)
 
     # motion functions
-    motion.moveTo(mode="time", value=5, target_heading=90) #also has speed and timeout arguments
-    motion.turnTo(target_heading=90) #also has speed, timeout, and threshold arguments
+    motion.moveTo(unit="time", value=100, target_heading=60,speed=80, timeout=1000) #also has speed and timeout arguments
+    # motion.turnTo(target_heading=90) #also has speed, timeout, and threshold arguments
 
     # tune the constants of the PID in motion_tuning.yaml
     # to go backward just put negative speed
 
 
 
-robot.run(
-    initialize=initialize,
-    autonomous=autonomous,
-    driver=testing,
-)
+# robot.run(
+#     initialize=initialize,
+#     autonomous=autonomous,
+#     driver=driver,
+# )
+
