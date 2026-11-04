@@ -301,8 +301,11 @@ class Sensing(SettingsManager):
             vector = np.zeros(3) #implicitly a xyz format okay 
             for i, axis in enumerate(XYZ_ARR):
                 vector[i] = getattr(read, f"{type}_{axis}")
-            setattr(self, f"raw_{type}", vector.copy())
+            changed = [vector[1],-vector[0],vector[2]]
+            setattr(self, f"raw_{type}", changed.copy())
         self.raw_timestamp = read.timestamp
+
+        #because jauden ho cannot mount properly
         return True
 
     def setHeadingOffset(self, offset):
